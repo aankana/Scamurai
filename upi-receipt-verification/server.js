@@ -41,15 +41,74 @@ app.post('/upload', upload.single('receipt'), async (req, res) => {
   }
 });
 
+const sharp = require('sharp');
+
+const preprocessImage = async (filePath) => {
+  const outputFilePath = 'uploads/preprocessed-' + Date.now() + '.png';
+  await sharp(filePath)
+    .resize(800) // Resize to improve OCR
+    .grayscale() // Convert to grayscale
+    .toFile(outputFilePath);
+  return outputFilePath;
+};
+
+// Modify the upload route to preprocess the image
+app.post('/upload', upload.single('receipt'), async (req, res) => {
+  const filePath = req.file.path;
+  try {
+    const preprocessedPath = await preprocessImage(filePath);
+    const isReal = await verifyReceipt(preprocessedPath);
+    res.send(isReal ? 'Receipt is real.' : 'Receipt is fake.');
+  } catch (error) {
+    res.status(500).send('Error verifying receipt.');
+  }
+});
+
+const Tesseract = require('tesseract.js');
+
 const verifyReceipt = (filePath) => {
-  // Placeholder verification logic
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const isReal = Math.random() > 0.5;
+  return new Promise((resolve, reject) => {
+    Tesseract.recognize(
+      filePath,
+      'eng',
+      {
+        logger: info => console.log(info) // Optional: log progress
+      }
+    ).then(({ data: { text } }) => {
+      console.log(text); // Log the extracted text
+      // Implement your logic to check if the text matches expected patterns
+      const isReal = text.includes('Expected Text'); // Example check
       resolve(isReal);
-    }, 2000);
+    }).catch(err => reject(err));
   });
 };
+
+const Razorpay = require('razorpay');
+
+const razorpay = new Razorpay({
+  key_id: 'YOUR_RAZORPAY_KEY_ID',
+  key_secret: 'YOUR_RAZORPAY_KEY_SECRET',
+});
+
+const verifyTransaction = async (transactionId) => {
+  try {
+    const payment = await razorpay.payments.fetch(transactionId);
+    if (payment.status === 'captured') {
+      return { valid: true, details: payment };
+    } else {
+      return { valid: false, details: payment };
+    }
+  } catch (error) {
+    console.error('Error verifying transaction:', error);
+    return { valid: false, error: error.message };
+  }
+};
+
+// Example usage
+const transactionId = 'UPI1234567890';
+verifyTransaction(transactionId).then((result) => {
+  console.log(result);
+});
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
